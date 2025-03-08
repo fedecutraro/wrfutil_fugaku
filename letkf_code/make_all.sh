@@ -14,7 +14,7 @@ if [ $COMPILATION_NAME == "FUJITSU_FUGAKU" ] ; then
   export F90="frtpx"
   export FFLAGS="-O3 -Nalloc_assign ${DEBUG_FLAGS}"
   export OMP="-Kopenmp"
-  export NETCDF="/home/ra000007/a04037/data/comp_libs_fujitsu/netcdf/"
+  export NETCDF="/share/ra000007/jruiz/comp_libs_fujitsu/netcdf/"
   export LIB_NETCDF="-L$NETCDF/lib/ -lnetcdff -lnetcdf -lhdf5_fortran -lhdf5_hl -lhdf5  -lfjprofmpi -lmpi_cxx"
   export INC_NETCDF="-I$NETCDF/include/"
   export LBLAS="-SSL2BLAMP"
