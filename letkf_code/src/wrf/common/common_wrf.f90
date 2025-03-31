@@ -23,7 +23,7 @@ MODULE common_wrf
 
   !MODULE VARIABLES (NOT READ FROM NAMELIST) 
   INTEGER, PARAMETER :: nv3d=15
-  INTEGER, PARAMETER :: nv2d=12
+  INTEGER, PARAMETER :: nv2d=13
   INTEGER, PARAMETER :: np2d=3
   INTEGER, PARAMETER :: ns3d=2  !Soil variables
   INTEGER, PARAMETER :: nid_obs=10
@@ -66,6 +66,7 @@ MODULE common_wrf
   INTEGER,PARAMETER :: iv2d_si=10
   INTEGER,PARAMETER :: iv2d_cw=11
   INTEGER,PARAMETER :: iv2d_mu=12
+  INTEGER,PARAMETER :: iv2d_ltng=13
 
   !SPECIAL VARIABLES
   INTEGER,PARAMETER :: iv3d_tv=100
@@ -109,8 +110,8 @@ MODULE common_wrf
   !   U          V         W         T         P         PH      QV        QC        
   & .true. , .true. , .true. , .true. , .true. , .true. , .true. , .false. , .true. , .true. , .true. , .true. ,&
   !   QR       QCI      QS       QG     CO_ANT  CO_BCK    CO_BBU     PS        T2M     Q2M       U10M    V10M
-  & .true. , .true. , .true. , .true. , .true. , .true. , .true. , &
-  ! LANDSEA  TSK SNOW     SNOWH    SEAICE   CANWAT         MU
+  & .true. , .true. , .true. , .true. , .true. , .true. , .true. , .false., &
+  ! LANDSEA  TSK SNOW     SNOWH    SEAICE   CANWAT         MU       LTNG
   & .true. , .true. , .true.  , .true. , .true. /)
   !  HFX_F    QFX_F   UST_F     SMOIS    TSLB
 
@@ -164,6 +165,7 @@ SUBROUTINE set_common_wrf(inputfile)
   element(nv3d+iv2d_si)   = 'SEAICE'
   element(nv3d+iv2d_cw)   = 'CANWAT'
   element(nv3d+iv2d_mu)   = 'MU    '
+  element(nv3d+iv2d_ltng) = 'LTNG'
   element(nv3d+nv2d+ip2d_hfx)   = 'HFX_FACTOR'
   element(nv3d+nv2d+ip2d_qfx)   = 'QFX_FACTOR'
   element(nv3d+nv2d+ip2d_ust)   = 'UST_FACTOR'
@@ -628,6 +630,10 @@ IF ( flag .EQ. '2d' )THEN
        nxvar=nlon-1
        nyvar=nlat-1
        readvar=present_variable(nv3d+iv)
+      CASE(iv2d_ltng)
+       nxvar=nlon-1
+       nyvar=nlat-1
+       nzvar=nlev-1
       CASE DEFAULT
        WRITE(6,*)"2D variable not recognized, retrieve none : ",iv,element(nv3d+iv)
        RETURN
@@ -636,10 +642,13 @@ IF ( flag .EQ. '2d' )THEN
   IF( readvar )THEN
   
       start = (/ 1,1,itime /)
-      count = (/ nxvar,nyvar,1,1 /) !READ ONE SINGLE LEVEL
-      CALL check_io(NF90_INQ_VARID(ncid,TRIM(varname),varid))
-      CALL check_io(NF90_GET_VAR(ncid,varid,fieldg(1:nxvar,1:nyvar,1),start,count))
-      IF( iv == iv2d_mu )THEN
+      IF( iv == iv2d_ltng ) THEN
+          CALL get_ltng(ncid, nxvar, nyvar, nzvar, fieldg)
+      ELSE
+          count = (/ nxvar,nyvar,1,1 /) !READ ONE SINGLE LEVEL
+          CALL check_io(NF90_INQ_VARID(ncid,TRIM(varname),varid))
+          CALL check_io(NF90_GET_VAR(ncid,varid,fieldg(1:nxvar,1:nyvar,1),start,count))
+      IF( iv == iv2d_mu ) THEN
           CALL check_io(NF90_INQ_VARID(ncid,TRIM(auxvarname),varid))
           CALL check_io(NF90_GET_VAR(ncid,varid,auxfieldg(1:nxvar,1:nyvar,1),start,count))
           fieldg=fieldg+auxfieldg
@@ -690,6 +699,66 @@ RETURN
 
 END SUBROUTINE read_var_wrf
 
+SUBROUTINE get_ltng(ncid, fieldg)
+
+    IMPLICIT NONE
+
+    INTEGER(4), INTENT(IN) :: ncid
+    REAL(r_sngl), INTENT(OUT) :: fieldg(nlon - 1, nlat - 1)
+
+END SUBROUTINE get_ltng
+
+
+SUBROUTINE get_partial_colmax(ncid, hgt_thresholds, partial_colmax)
+
+    INTEGER(4), INTENT(IN) :: ncid
+    REAL(r_sngl), INTENT(IN) :: hgt_thresholds(:)
+    REAL(r_sngl), ALLOCATABLE, INTENT(OUT) :: partial_colmax(:, :, :)
+    INTEGER :: varid, i
+    REAL(r_sngl) :: ph(nlon - 1, nlat - 1, nlev), phb(nlon - 1, nlat - 1, nlev)
+    REAL(r_sngl) :: hgt(nlon - 1, nlat - 1)
+    REAL(r_sngl) :: zagl(nlon - 1, nlat - 1, nlev - 1), dbz(nlon - 1, nlat - 1, nlev - 1)
+    INTEGER, ALLOCATABLE :: start(:), count(:)
+
+    ALLOCATE(start(4), count(4))
+    start = (/ 1, 1, 1, itime/)
+    count = (/ nlon - 1, nlat - 1, nlev, 1 /)
+
+    ! Read height base state
+    CALL check_io(NF90_INQ_VARID(ncid, 'PHB', varid))
+    CALL check_io(NF90_PUT_VAR(ncid, varid, phb(1:nlon - 1, 1:nlat - 1, 1:nlev), start, count))
+
+    ! Read height perturbations
+    CALL check_io(NF90_INQ_VARID(ncid, 'PH', varid))
+    CALL check_io(NF90_PUT_VAR(ncid, varid, ph(1:nlon - 1, 1:nlat - 1, 1:nlev), start, count))
+
+    ! Read radar reflectivity
+    count = (/ nlon - 1, nlat - 1, nlev - 1, 1 /)
+    CALL check_io(NF90_INQ_VARID(ncid, 'REFL_10CM', varid))
+    CALL check_io(NF90_PUT_VAR(ncid, varid, dbz(1:nlon - 1, 1:nlat - 1), start, count))
+
+    DEALLOCATE(start, count)
+    ALLOCATE(start(3), count(3))
+    start = (/ 1, 1, itime/)
+    count = (/ nlon - 1, nlat - 1, 1 /)
+
+    ! Read surface height
+    CALL check_io(NF90_INQ_VARID(ncid, 'HGT', varid))
+    CALL check_io(NF90_PUT_VAR(ncid, varid, hgt(1:nlon - 1, 1:nlat - 1), start, count))
+
+    ! Get height above ground level
+    zagl = ((ph + phb)/gg) - hgt
+    zagl = (zagl(:, :, 1:nlev - 1) + zagl(:, :, 2:nlev))*0.5 ! Destagger
+
+    ALLOCATE(partial_colmax(nlon - 1, nlat - 1, size(hgt_thresholds)))
+
+    DO i=1, size(hgt_thresholds) - 1
+        WHERE ((zagl > hgt_thresholds(i)) .and. (zagl < hgt_thresholds(i+1)))
+            partial_colmax(:, :, i) = MAX(dbz, dim = 3)
+        END WHERE
+    END DO
+
+END SUBROUTINE get_partial_colmax
 
 SUBROUTINE write_var_wrf(ncid,iv,slev,elev,fieldg,flag)
 IMPLICIT NONE

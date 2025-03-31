@@ -43,9 +43,12 @@ MODULE common_obs_wrf
   INTEGER , PARAMETER :: id_reflectivity_obs=4001
   INTEGER , PARAMETER :: id_radialwind_obs  =4002
   INTEGER , PARAMETER :: id_pseudorh_obs    =4003 
+  ! Lightning observations
+  integer, parameter :: id_lt02d_obs = 5001 ! id for zero lightning observation
+  integer, parameter :: id_lt2d_obs = 5002 ! id for non-zero lightning observation
   !chem observation codes
-  INTEGER, PARAMETER :: id_totco_obs=5001
-  INTEGER, PARAMETER :: id_co_obs = 5002
+  INTEGER, PARAMETER :: id_totco_obs=6001
+  INTEGER, PARAMETER :: id_co_obs = 6002
 
  
   REAL(r_size) :: minref !=10.0d0**( minrefdbz / 10.0d0)
@@ -73,7 +76,7 @@ logical , intent(out) :: output
          output=.true.
     CASE( id_reflectivity_obs , id_radialwind_obs,         &
           id_pseudorh_obs , id_us_obs , id_vs_obs ,        & 
-          id_ts_obs , id_qs_obs , id_rhs_obs, id_ps_obs )
+          id_ts_obs , id_qs_obs , id_rhs_obs, id_ps_obs, id_lt02d_obs, id_lt2d_obs )
          output=.false.
     CASE DEFAULT
          WRITE(6,*)"[Warning]: Not recognized obs type in is_vertp ",obstype_in
@@ -93,7 +96,7 @@ logical , intent(out) :: output
          id_pseudorh_obs )
      output=.true.
    CASE( id_ps_obs , id_us_obs , id_vs_obs , id_ts_obs , id_qs_obs , id_rhs_obs , &
-         id_pwv_obs, id_rain_obs , id_totco_obs )
+         id_pwv_obs, id_rain_obs , id_totco_obs ,  id_lt02d_obs, id_lt2d_obs)
      output=.false.
    CASE default
        WRITE(6,*)"[Warning]: Not recognized obs type in is_3dvar ",obstype_in
@@ -130,6 +133,10 @@ INTEGER, INTENT(OUT) :: iobs_out
         iobs_out=9
       CASE(id_co_obs,id_totco_obs)
         iobs_out=10
+      CASE(id_lt02d_obs)
+        iobs_out=11
+      CASE(id_lt2d_obs)
+        iobs_out=12
       END SELECT
 
 END SUBROUTINE get_iobs
@@ -343,6 +350,9 @@ SUBROUTINE Trans_XtoY(elm,typ,olon,olat,odat,ri,rj,rk,raz,rel,v3d,v2d,yobs)
        yobs=  yobs - 1000.0d0
 
      ENDIF
+
+  CASE(id_lt02d_obs, id_lt2d_obs)
+    CALL itpl_2d(v2d(:,:,iv2d_ltng),ri,rj,yobs)
 
   END SELECT
 
@@ -1335,7 +1345,7 @@ SUBROUTINE get_nobs(cfile,nn)
   INTEGER,INTENT(OUT) :: nn
   REAL(r_sngl) :: wk(7)
   INTEGER :: ios
-  INTEGER :: iu,iv,it,iq,irh,itv,ips,itc
+  INTEGER :: iu,iv,it,iq,irh,itv,ips,itc,ilt0,ilt
   INTEGER :: iunit
   LOGICAL :: ex
 
@@ -1348,6 +1358,8 @@ SUBROUTINE get_nobs(cfile,nn)
   itv = 0
   ips = 0
   itc = 0
+  ilt0 = 0
+  ilt = 0
   iunit=91
   INQUIRE(FILE=cfile,EXIST=ex)
   IF(ex) THEN
@@ -1372,6 +1384,10 @@ SUBROUTINE get_nobs(cfile,nn)
         ips = ips + 1
       CASE(id_tclon_obs)
         itc = itc + 1
+      CASE(id_lt02d_obs)
+        ilt0 = ilt0 + 1
+      CASE(id_lt2d_obs)
+        ilt = ilt + 1
       END SELECT
       nn = nn + 1
     END DO
@@ -1384,6 +1400,8 @@ SUBROUTINE get_nobs(cfile,nn)
     WRITE(6,'(A12,I10)') '         TV:',itv    
     WRITE(6,'(A12,I10)') '         Ps:',ips
     WRITE(6,'(A12,I10)') '   TC TRACK:',itc
+    WRITE(6,'(A12,I10)') '     LTNG 0:',ilt0
+    WRITE(6,'(A12,I10)') '       LTNG:',ilt
     CLOSE(iunit)
   ELSE
     WRITE(6,'(2A)') cfile,' does not exist -- skipped'
