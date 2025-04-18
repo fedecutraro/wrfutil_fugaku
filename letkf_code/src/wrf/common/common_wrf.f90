@@ -11,6 +11,7 @@ MODULE common_wrf
 !=======================================================================
 !$USE OMP_LIB
   USE common
+  USE common_torch
   USE map_utils
 
   USE netcdf
@@ -633,7 +634,7 @@ IF ( flag .EQ. '2d' )THEN
       CASE(iv2d_ltng)
        nxvar=nlon-1
        nyvar=nlat-1
-       nzvar=nlev-1
+       readvar=.true.
       CASE DEFAULT
        WRITE(6,*)"2D variable not recognized, retrieve none : ",iv,element(nv3d+iv)
        RETURN
@@ -643,7 +644,7 @@ IF ( flag .EQ. '2d' )THEN
   
       start = (/ 1,1,itime /)
       IF( iv == iv2d_ltng ) THEN
-          CALL get_ltng(ncid, nxvar, nyvar, nzvar, fieldg)
+          CALL get_ltng(ncid, fieldg(1:nxvar, 1:nyvar, 1))
       ELSE
           count = (/ nxvar,nyvar,1,1 /) !READ ONE SINGLE LEVEL
           CALL check_io(NF90_INQ_VARID(ncid,TRIM(varname),varid))
@@ -704,25 +705,45 @@ SUBROUTINE get_ltng(ncid, fieldg)
     IMPLICIT NONE
 
     INTEGER(4), INTENT(IN) :: ncid
-    REAL(r_sngl), INTENT(OUT) :: fieldg(nlon - 1, nlat - 1)
+    REAL(r_sngl), INTENT(OUT) :: fieldg(nlon - 1, nlat - 1, 1)
+    REAL(r_sngl) :: net_out(1, nlon - 1, nlat - 1)
+    REAL(r_sngl) :: partial_colmax(1, 6, nlon - 1, nlat - 1)
+    LOGICAL :: file_exist
+
+    get_partial_colmax(ncid, partial_colmax)
+   
+    INQUIRE(FILE = ltng_model, EXIST = file_exist)
+    IF ( .NOT. file_exist) THEN
+        ml_init(ltng_model)
+        ml_routine(partial_colmax, net_out)
+        ml_final()
+    ELSE
+        WRITE(6,*)"Torch model for lightning not found, retrieve none."
+    END IF
+
+    fieldg = RESHAPE(net_out, (/ nlon - 1, nlat - 1, 1 /)) !TODO Chequear que no se este dando vuelta alguna dimension
 
 END SUBROUTINE get_ltng
 
 
-SUBROUTINE get_partial_colmax(ncid, hgt_thresholds, partial_colmax)
+SUBROUTINE get_partial_colmax(ncid, partial_colmax)
+
+    IMPLICIT NONE
 
     INTEGER(4), INTENT(IN) :: ncid
-    REAL(r_sngl), INTENT(IN) :: hgt_thresholds(:)
-    REAL(r_sngl), ALLOCATABLE, INTENT(OUT) :: partial_colmax(:, :, :)
+    REAL(r_sngl), ALLOCATABLE, INTENT(OUT) :: partial_colmax(1, 6, nlon - 1, nlat - 1)
     INTEGER :: varid, i
-    REAL(r_sngl) :: ph(nlon - 1, nlat - 1, nlev), phb(nlon - 1, nlat - 1, nlev)
+    REAL(r_sngl) :: hgt_thresholds(7)
+    REAL(r_sngl) :: ph(nlon - 1, nlat - 1, nlev), phb(nlon - 1, nlat - 1, nlev), zagl(nlon - 1, nlat - 1, nlev)
+    REAL(r_sngl) :: zagl_destagged(nlon - 1, nlat - 1, nlev - 1), dbz(nlon - 1, nlat - 1, nlev - 1)
     REAL(r_sngl) :: hgt(nlon - 1, nlat - 1)
-    REAL(r_sngl) :: zagl(nlon - 1, nlat - 1, nlev - 1), dbz(nlon - 1, nlat - 1, nlev - 1)
+    LOGICAL, DIMENSION(nlon - 1, nlat - 1, nlev - 1) :: mask
     INTEGER, ALLOCATABLE :: start(:), count(:)
 
     ALLOCATE(start(4), count(4))
-    start = (/ 1, 1, 1, itime/)
+    start = (/ 1, 1, 1, 1/)
     count = (/ nlon - 1, nlat - 1, nlev, 1 /)
+    hgt_thresholds = (/ 1000, 3000, 5000, 7000, 9000, 11000, 13000 /)
 
     ! Read height base state
     CALL check_io(NF90_INQ_VARID(ncid, 'PHB', varid))
@@ -748,17 +769,15 @@ SUBROUTINE get_partial_colmax(ncid, hgt_thresholds, partial_colmax)
 
     ! Get height above ground level
     zagl = ((ph + phb)/gg) - hgt
-    zagl = (zagl(:, :, 1:nlev - 1) + zagl(:, :, 2:nlev))*0.5 ! Destagger
-
-    ALLOCATE(partial_colmax(nlon - 1, nlat - 1, size(hgt_thresholds)))
+    zagl_destagged = (zagl(:, :, 1:nlev - 1) + zagl(:, :, 2:nlev))*0.5 ! Destagger
 
     DO i=1, size(hgt_thresholds) - 1
-        WHERE ((zagl > hgt_thresholds(i)) .and. (zagl < hgt_thresholds(i+1)))
-            partial_colmax(:, :, i) = MAX(dbz, dim = 3)
-        END WHERE
+        mask = ((zagl_destagged > hgt_thresholds(i)) .and. (zagl_destagged < hgt_thresholds(i+1)))
+        partial_colmax(1, i, :, :) = MAXVAL(dbz, dim = 3, mask = mask)
     END DO
 
 END SUBROUTINE get_partial_colmax
+
 
 SUBROUTINE write_var_wrf(ncid,iv,slev,elev,fieldg,flag)
 IMPLICIT NONE

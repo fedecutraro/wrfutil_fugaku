@@ -97,6 +97,9 @@ MODULE common_namelist
   REAL(r_size)       :: minrefdbz=0.0d0          !Reflectivity values below this threshold won't be assimilated.
   REAL(r_size)       :: pseudorh_error=0.1       !Obserational error for pseudo RH observations.
 
+  !LIGHTNING DA
+  CHARACTER(LEN=128) :: ltng_model='./ltng_torch.pt' ! Path to torchscript with the NN to transform forecasted radar into lightning.
+
   !OBSGRID SECTION
   REAL(r_size)       :: regrid_res=1.0d0         !Horizontal resolution of obsgrid grid (degree)
   REAL(r_size)       :: regrid_vert_res=100.0d0  !Vertical resolution of obsgrid grid (hPa)
@@ -134,6 +137,7 @@ NAMELIST / PARAMETER_ESTIMATION / estpar , smooth_par_update_flag , update_param
  & param_default_value , param_min_value , param_max_value 
 NAMELIST / INFLATION / cov_infl_mul , sp_infl_add , relax_alpha_spread , relax_alpha ,min_infl_mul
 NAMELIST / RADAR_DA  / interpolation_technique ,  nradar , use_wt , use_pseudorh , pseudorh_error , minrefdbz , rainratio_threshold
+NAMELIST / LIGHTNING_DA / ltng_model
 NAMELIST / OBSGRID / nbv , narea , vlon1 , vlon2 , vlat1 , vlat2 , compute_stat, filter_input , regrid_output, regrid_res ,  &
                      regrid_vert_res
 
@@ -179,6 +183,12 @@ REWIND(54)
 READ(54,NML=RADAR_DA,IOSTAT=IERR)
 IF(IERR /=0)THEN
 WRITE(*,*)"Warning!! Error during namelist reading at RADAR_DA section"
+WRITE(*,*)"Using default values"
+ENDIF
+REWIND(54)
+READ(54,NML=LIGHTNING_DA,IOSTAT=IERR)
+IF(IERR /=0)THEN
+WRITE(*,*)"Warning!! Error during namelist reading at LIGHTNING_DA section"
 WRITE(*,*)"Using default values"
 ENDIF
 REWIND(54)
