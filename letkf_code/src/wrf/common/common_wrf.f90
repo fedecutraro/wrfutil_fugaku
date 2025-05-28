@@ -704,22 +704,42 @@ SUBROUTINE get_ltng(ncid, fieldg)
 
     IMPLICIT NONE
 
-    INTEGER(4), INTENT(IN) :: ncid
+    INTEGER(4), INTENT(IN) :: ncid, nlat_2km, nlon_2km, i, j, k
     REAL(r_sngl), INTENT(OUT) :: fieldg(nlon - 1, nlat - 1, 1)
     REAL(r_sngl) :: net_out(1, nlon - 1, nlat - 1)
     REAL(r_sngl) :: partial_colmax(1, 6, nlon - 1, nlat - 1)
+    REAL(r_sngl), ALLOCATABLE :: partial_colmax_2km(:, :, :, :), net_out_2km(:, :, :)
+    REAL(r_sngl) :: delta_resolution
     LOGICAL :: file_exist
 
     get_partial_colmax(ncid, partial_colmax)
-   
+
+    ! lightning CNN expects 2km data resolution. Interpolate to 2km
+    delta_resolution = pdx/2000.
+    nlat_2km = (nlat - 1)*delta_resolution
+    nlon_2km = (nlon - 1)*delta_resolution
+    ALLOCATE(partial_colmax_2km((1, 6, nlon_2km - 1, nlat_2km - 1)), net_out_2km(1, nlon_2km - 1, nlat_2km - 1))
+
+    !TODO Estimar tiempos de esta transformacion
+    DO i = 0, nlon_2km - 2
+        DO j = 0, nlat_2km - 2
+            DO k = 1, 6
+                itpl_2d(partial_colmax(1, k, :, :), REAL(i)/delta_resolution, REAL(j)/delta_resolution, &
+                        partial_colmax_2km(1, k, i + 1, j + 1))
+
     INQUIRE(FILE = ltng_model, EXIST = file_exist)
     IF ( .NOT. file_exist) THEN
         ml_init(ltng_model)
-        ml_routine(partial_colmax, net_out)
+        ml_routine(partial_colmax_2km, net_out_2km)
         ml_final()
     ELSE
         WRITE(6,*)"Torch model for lightning not found, retrieve none."
     END IF
+
+    ! Return from 2km to native resolution
+    DO i = 0, nlon - 2
+        DO j = 0, nlat - 2
+            itpl_2d(net_out_2km(1, :, :), REAL(i)*delta_resolution, REAL(j)*delta_resolution, netout(1, i + 1, j + 1))
 
     fieldg = RESHAPE(net_out, (/ nlon - 1, nlat - 1, 1 /)) !TODO Chequear que no se este dando vuelta alguna dimension
 
